@@ -97,16 +97,33 @@ export function setSettingsJson(settings, setting, value) {
 // settings. Since these indexes are unreliable AF, switch to use the monitor
 // serial as its id while keeping it backward compatible.
 function getMonitorSetting(settings, settingName, monitorIndex, fallback) {
+  let settingsJson = getSettingsJson(settings, settingName)
+
+  let value = lookupMonitorValue(settingsJson, monitorIndex)
+
+  // No saved entry for this monitor. This is permanent for ephemeral monitors
+  // (e.g. remote-desktop virtual displays whose serial, and therefore id,
+  // changes on every connection), which would otherwise reset to hardcoded
+  // defaults on each connect. Inherit the primary monitor's value so unknown
+  // monitors match the configured panel instead.
+  if (value === undefined) {
+    let primaryIndex = getPrimaryIndex(settings.get_string('primary-monitor'))
+
+    if (primaryIndex != monitorIndex)
+      value = lookupMonitorValue(settingsJson, primaryIndex)
+  }
+
+  return value !== undefined ? value : fallback
+}
+
+function lookupMonitorValue(settingsJson, monitorIndex) {
   let monitorId = monitorIndexToId[monitorIndex]
+  let value =
+    settingsJson[monitorId] ??
+    settingsJson[monitorIndex] ??
+    settingsJson[availableMonitors[monitorIndex]?.id]
 
-  settings = getSettingsJson(settings, settingName)
-
-  return (
-    settings[monitorId] ||
-    settings[monitorIndex] ||
-    settings[availableMonitors[monitorIndex]?.id] ||
-    fallback
-  )
+  return value
 }
 
 function setMonitorSetting(settings, settingName, monitorIndex, value) {
