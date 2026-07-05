@@ -104,26 +104,54 @@ function getMonitorSetting(settings, settingName, monitorIndex, fallback) {
   // No saved entry for this monitor. This is permanent for ephemeral monitors
   // (e.g. remote-desktop virtual displays whose serial, and therefore id,
   // changes on every connection), which would otherwise reset to hardcoded
-  // defaults on each connect. Inherit the primary monitor's value so unknown
-  // monitors match the configured panel instead.
-  if (value === undefined) {
-    let primaryIndex = getPrimaryIndex(settings.get_string('primary-monitor'))
-
-    if (primaryIndex != monitorIndex)
-      value = lookupMonitorValue(settingsJson, primaryIndex)
-  }
+  // defaults on each connect. Inherit an existing config so unknown monitors
+  // match the configured panel instead.
+  if (value === undefined)
+    value = inheritMonitorValue(settings, settingsJson, monitorIndex)
 
   return value !== undefined ? value : fallback
 }
 
 function lookupMonitorValue(settingsJson, monitorIndex) {
   let monitorId = monitorIndexToId[monitorIndex]
-  let value =
+
+  return (
     settingsJson[monitorId] ??
     settingsJson[monitorIndex] ??
     settingsJson[availableMonitors[monitorIndex]?.id]
+  )
+}
 
-  return value
+// Pick a config for a monitor that has none saved, preferring the configured
+// primary. Kept independent of Mutter's transient "primary" flag and of monitor
+// index reshuffles (which happen when displays are added/removed/scaled), so the
+// result doesn't flip between connections.
+function inheritMonitorValue(settings, settingsJson, monitorIndex) {
+  let monitorId = monitorIndexToId[monitorIndex]
+
+  // 1) The DTP-configured primary, looked up directly by its (stable serial) id.
+  let primaryId = settings.get_string('primary-monitor')
+  if (primaryId && primaryId != monitorId && settingsJson[primaryId] !== undefined)
+    return settingsJson[primaryId]
+
+  // 2) The configured primary resolved to an index (covers legacy numeric ids).
+  let primaryIndex = getPrimaryIndex(primaryId)
+  if (primaryIndex != monitorIndex) {
+    let primaryValue = lookupMonitorValue(settingsJson, primaryIndex)
+    if (primaryValue !== undefined) return primaryValue
+  }
+
+  // 3) Last resort, when no primary can be pinned down (e.g. primary-monitor is
+  // unset): the first other currently-connected monitor that has a saved config.
+  // Iterating availableMonitors keeps this deterministic and skips dead serials.
+  for (let i = 0; i < availableMonitors.length; i++) {
+    if (i == monitorIndex) continue
+
+    let value = lookupMonitorValue(settingsJson, i)
+    if (value !== undefined) return value
+  }
+
+  return undefined
 }
 
 function setMonitorSetting(settings, settingName, monitorIndex, value) {
